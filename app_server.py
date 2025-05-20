@@ -4,9 +4,6 @@ import pandas as pd
 import os
 import time
 import subprocess
-import tkinter as tk
-from tkinter import filedialog
-import threading
 import PyPDF2  # PDF 텍스트 추출을 위한 라이브러리 추가
 
 # 페이지 설정
@@ -155,31 +152,11 @@ def extract_text_and_tables(pdf_path, start_page, end_page):
 st.title("📊 PDF Analyzer")
 st.markdown("PDF 파일에서 표를 추출하여 Excel 파일로 변환합니다.")
 
-# 파일 선택
-def select_file():
-    root = tk.Tk()
-    root.attributes('-topmost', True)  # 항상 최상위에 표시
-    root.withdraw()  # GUI 창 숨기기
-    file_path = filedialog.askopenfilename(
-        title="PDF 파일을 선택하세요",
-        filetypes=[("PDF 파일", "*.pdf")],
-        parent=root
-    )
-    root.destroy()
-    return file_path
-
-# 파일 선택 버튼
-if st.button("PDF 파일 선택하기"):
-    file_path = select_file()
-    if file_path:
-        st.session_state['pdf_path'] = file_path
-
-# 파일 경로 표시 및 입력
 # 파일 경로 입력
 pdf_path = st.text_input(
     "PDF 파일의 전체 경로를 입력하세요",
     value=st.session_state.get('pdf_path', ''),
-    help="파일 선택 버튼을 클릭하거나 직접 경로를 입력하세요"
+    help="PDF 파일의 전체 경로를 입력하세요. 예: /home/ubuntu/documents/example.pdf"
 )
 
 if pdf_path and os.path.exists(pdf_path):

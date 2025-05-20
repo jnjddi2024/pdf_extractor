@@ -72,11 +72,24 @@ nohup streamlit run app.py --server.port 8501 --server.address 0.0.0.0 > streaml
 # 실행 중인 프로세스 확인
 ps aux | grep streamlit
 
+# 프로세스 중지 방법
+kill <PID>              # 일반 종료
+kill -9 <PID>          # 강제 종료
+pkill -f streamlit     # 프로세스 이름으로 종료
+sudo systemctl stop pdf-analyzer  # systemd 서비스 종료
+
 # 로그 확인
 tail -f streamlit.log
 ```
 
-8. 방화벽 설정 (필요한 경우):
+8. 서버 IP 설정:
+   - `--server.address 0.0.0.0` 설정은 모든 네트워크 인터페이스에서의 접속을 허용
+   - 실제 IP로 변경할 필요 없음
+   - 접속 방법:
+     - 로컬 접속: `http://localhost:8501` 또는 `http://127.0.0.1:8501`
+     - 외부 접속: `http://서버IP:8501` 또는 `http://도메인:8501`
+
+9. 방화벽 설정 (필요한 경우):
 ```bash
 # UFW 방화벽 사용 시
 sudo ufw allow 8501
@@ -85,7 +98,7 @@ sudo ufw allow 8501
 sudo iptables -A INPUT -p tcp --dport 8501 -j ACCEPT
 ```
 
-9. 서비스 등록 (systemd 사용 시):
+10. 서비스 등록 (systemd 사용 시):
 ```bash
 # 서비스 파일 생성
 sudo nano /etc/systemd/system/pdf-analyzer.service
@@ -112,10 +125,6 @@ sudo systemctl enable pdf-analyzer
 # 서비스 상태 확인
 sudo systemctl status pdf-analyzer
 ```
-
-10. 접속 방법:
-    - 웹 브라우저에서 `http://서버IP:8501` 접속
-    - 예: `http://192.168.1.100:8501`
 
 ## 사용 방법
 
