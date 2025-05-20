@@ -4,11 +4,10 @@ import pandas as pd
 import os
 import time
 import subprocess
-import PyPDF2
-import tempfile
-import shutil
-from pathlib import Path
-import base64
+import tkinter as tk
+from tkinter import filedialog
+import threading
+import PyPDF2  # PDF 텍스트 추출을 위한 라이브러리 추가
 
 # 페이지 설정
 st.set_page_config(
@@ -16,63 +15,6 @@ st.set_page_config(
     page_icon="📊",
     layout="wide"
 )
-
-# 세션 상태 초기화
-if 'temp_dir' not in st.session_state:
-    st.session_state.temp_dir = tempfile.mkdtemp()
-
-def cleanup_temp_files():
-    """임시 파일 정리"""
-    try:
-        if os.path.exists(st.session_state.temp_dir):
-            shutil.rmtree(st.session_state.temp_dir)
-        st.session_state.temp_dir = tempfile.mkdtemp()
-    except Exception as e:
-        st.error(f"임시 파일 정리 중 오류 발생: {str(e)}")
-
-def save_uploaded_file(uploaded_file):
-    """업로드된 파일을 임시 디렉토리에 저장"""
-    try:
-        # 임시 파일 경로 생성
-        temp_path = Path(st.session_state.temp_dir) / uploaded_file.name
-        temp_path = str(temp_path)
-        
-        # 파일 저장
-        with open(temp_path, "wb") as f:
-            f.write(uploaded_file.getbuffer())
-        
-        return temp_path
-    except Exception as e:
-        st.error(f"파일 저장 중 오류 발생: {str(e)}")
-        return None
-
-def validate_pdf_file(file_path):
-    """PDF 파일 유효성 검사"""
-    try:
-        if not os.path.exists(file_path):
-            st.error("PDF 파일을 찾을 수 없습니다.")
-            return False
-            
-        if os.path.getsize(file_path) == 0:
-            st.error("PDF 파일이 비어있습니다.")
-            return False
-            
-        # PDF 파일 유효성 검사
-        with open(file_path, 'rb') as f:
-            PyPDF2.PdfReader(f)
-            
-        return True
-    except Exception as e:
-        st.error(f"PDF 파일이 손상되었거나 유효하지 않습니다: {str(e)}")
-        return False
-
-def get_download_link(file_path, file_name, link_text):
-    """파일 다운로드 링크 생성"""
-    with open(file_path, "rb") as f:
-        bytes = f.read()
-        b64 = base64.b64encode(bytes).decode()
-        href = f'<a href="data:application/octet-stream;base64,{b64}" download="{file_name}">{link_text}</a>'
-        return href
 
 def process_pdf(file_path, start_page, end_page, lattice, stream, guess):
     try:
@@ -213,24 +155,41 @@ def extract_text_and_tables(pdf_path, start_page, end_page):
 st.title("📊 PDF Analyzer")
 st.markdown("PDF 파일에서 표를 추출하여 Excel 파일로 변환합니다.")
 
-# 파일 업로드
-uploaded_file = st.file_uploader("PDF 파일을 선택하세요", type=['pdf'], help="PDF 파일을 선택하거나 드래그하여 업로드하세요")
+# 파일 선택
+def select_file():
+    root = tk.Tk()
+    root.attributes('-topmost', True)  # 항상 최상위에 표시
+    root.withdraw()  # GUI 창 숨기기
+    file_path = filedialog.askopenfilename(
+        title="PDF 파일을 선택하세요",
+        filetypes=[("PDF 파일", "*.pdf")],
+        parent=root
+    )
+    root.destroy()
+    return file_path
 
-if uploaded_file is not None:
-    try:
-        # 파일 저장
-        pdf_path = save_uploaded_file(uploaded_file)
-        if not pdf_path:
-            st.error("파일 저장에 실패했습니다.")
-            cleanup_temp_files()
-            st.stop()
-            
+# 파일 선택 버튼
+if st.button("PDF 파일 선택하기"):
+    file_path = select_file()
+    if file_path:
+        st.session_state['pdf_path'] = file_path
+
+# 파일 경로 표시 및 입력
+# 파일 경로 입력
+pdf_path = st.text_input(
+    "PDF 파일의 전체 경로를 입력하세요",
+    value=st.session_state.get('pdf_path', ''),
+    help="파일 선택 버튼을 클릭하거나 직접 경로를 입력하세요"
+)
+
+if pdf_path and os.path.exists(pdf_path):
+    if pdf_path.lower().endswith('.pdf'):
         # 파일 정보 표시
         file_size = os.path.getsize(pdf_path) / 1024  # KB
         file_details = {
-            "파일명": uploaded_file.name,
+            "파일명": os.path.basename(pdf_path),
             "파일크기": f"{file_size:.2f} KB",
-            "파일경로": os.path.abspath(pdf_path)
+            "파일경로": pdf_path
         }
         st.write(file_details)
 
@@ -248,7 +207,7 @@ if uploaded_file is not None:
             guess = st.checkbox("표 위치 자동 감지", value=True, help="표 위치를 자동으로 감지")
 
         # 버튼을 중앙에 배치하고 크기 조정
-        col1, col2, col3 = st.columns([1, 2, 1])
+        col1, col2, col3 = st.columns([1, 2, 1])  # 중앙 정렬을 위한 3개 컬럼
         with col2:
             st.markdown("""
                 <style>
@@ -264,19 +223,14 @@ if uploaded_file is not None:
             with col_btn2:
                 extract_tables = st.button("표 추출하기", type="primary")
 
-        if extract_info or extract_tables:
-            # PDF 파일 유효성 검사
-            if not validate_pdf_file(pdf_path):
-                cleanup_temp_files()
-                st.stop()
-
-            if extract_info:
+        if extract_info:
+            try:
                 with st.spinner("현장정보 추출 중..."):
                     # 페이지 범위 설정
                     info_start_page = start_page if start_page > 0 else 1
                     info_end_page = end_page if end_page > 0 else 5
                     
-                    # 텍스트와 표 추출
+                    # 1-5 페이지 텍스트와 표 추출
                     text_content, tables_content = extract_text_and_tables(pdf_path, info_start_page, info_end_page)
                     
                     if text_content or tables_content:
@@ -287,14 +241,6 @@ if uploaded_file is not None:
                         if text_content:
                             st.subheader(f"추출된 텍스트 (페이지 {info_start_page}-{info_end_page})")
                             st.text_area("텍스트 내용", "\n".join(text_content), height=400)
-                            
-                            # 텍스트 파일로 다운로드
-                            text_file_path = os.path.join(st.session_state.temp_dir, f"{pdf_filename}_text.txt")
-                            with open(text_file_path, "w", encoding="utf-8") as f:
-                                f.write("\n".join(text_content))
-                            
-                            # 다운로드 링크 생성
-                            st.markdown(get_download_link(text_file_path, f"{pdf_filename}_text.txt", "텍스트 파일 다운로드"), unsafe_allow_html=True)
                         
                         # 표 내용 표시
                         if tables_content:
@@ -305,22 +251,55 @@ if uploaded_file is not None:
                                     if not df.empty:
                                         st.write(f"표 {i+1}")
                                         st.dataframe(df)
-                            
-                            # Excel 파일로 다운로드 (표만)
-                            excel_path = os.path.join(st.session_state.temp_dir, f"{pdf_filename}_tables.xlsx")
+                        
+                        # 텍스트 파일로 다운로드
+                        text_file_path = os.path.join("temp", f"{pdf_filename}_text.txt")
+                        os.makedirs("temp", exist_ok=True)
+                        
+                        with open(text_file_path, "w", encoding="utf-8") as f:
+                            f.write("\n".join(text_content))
+                        
+                        with open(text_file_path, "r", encoding="utf-8") as f:
+                            st.download_button(
+                                label="텍스트 파일 다운로드",
+                                data=f,
+                                file_name=f"{pdf_filename}_text.txt",
+                                mime="text/plain"
+                            )
+                        
+                        # Excel 파일로 다운로드 (표만)
+                        if tables_content:
+                            excel_path = os.path.join("temp", f"{pdf_filename}_tables.xlsx")
                             with pd.ExcelWriter(excel_path, engine='openpyxl') as writer:
                                 for page, tables in tables_content:
                                     for i, df in enumerate(tables):
                                         if not df.empty:
                                             sheet_name = f'Page{page}_Table{i+1}'
                                             df.to_excel(writer, sheet_name=sheet_name, index=False)
-                            
-                            # 다운로드 링크 생성
-                            st.markdown(get_download_link(excel_path, f"{pdf_filename}_tables.xlsx", "표 Excel 파일 다운로드"), unsafe_allow_html=True)
+                        
+                            with open(excel_path, 'rb') as f:
+                                st.download_button(
+                                    label="표 Excel 파일 다운로드",
+                                    data=f,
+                                    file_name=f"{pdf_filename}_tables.xlsx",
+                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                                )
+                        
+                            # 임시 Excel 파일 정리
+                            if os.path.exists(excel_path):
+                                os.unlink(excel_path)
+                        
+                        # 임시 텍스트 파일 정리
+                        if os.path.exists(text_file_path):
+                            os.unlink(text_file_path)
                     else:
                         st.warning("내용을 추출할 수 없습니다.")
+            except Exception as e:
+                st.error(f"처리 중 오류가 발생했습니다: {str(e)}")
+                st.error("다시 시도해주세요.")
 
-            elif extract_tables:
+        elif extract_tables:
+            try:
                 with st.spinner("PDF 파일 처리 중..."):
                     # PDF 처리
                     tables = process_pdf(pdf_path, start_page, end_page, lattice, stream, guess)
@@ -330,14 +309,23 @@ if uploaded_file is not None:
                         pdf_filename = os.path.splitext(os.path.basename(pdf_path))[0]
                         
                         # Excel 파일로 저장
-                        output_path = os.path.join(st.session_state.temp_dir, f"{pdf_filename}_tables.xlsx")
+                        output_path = os.path.join("temp", f"{pdf_filename}_tables.xlsx")
+                        os.makedirs("temp", exist_ok=True)
+                        
                         with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
                             for i, df in enumerate(tables):
                                 if not df.empty:
+                                    # 빈 컬럼도 포함하여 저장
                                     df.to_excel(writer, sheet_name=f'Table_{i+1}', index=False)
 
-                        # 다운로드 링크 생성
-                        st.markdown(get_download_link(output_path, f"{pdf_filename}_tables.xlsx", "Excel 파일 다운로드"), unsafe_allow_html=True)
+                        # 다운로드 버튼
+                        with open(output_path, 'rb') as f:
+                            st.download_button(
+                                label="Excel 파일 다운로드",
+                                data=f,
+                                file_name=f"{pdf_filename}_tables.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                            )
 
                         # 미리보기
                         st.success("표 추출이 완료되었습니다!")
@@ -345,24 +333,31 @@ if uploaded_file is not None:
                             if not df.empty:
                                 st.write(f"표 {i+1}")
                                 st.dataframe(df)
+
+                        # 임시 파일 정리
+                        if os.path.exists(output_path):
+                            os.unlink(output_path)
                     else:
                         st.warning("선택한 페이지 범위에서 표를 찾을 수 없습니다.")
 
-    except Exception as e:
-        st.error(f"파일 처리 중 오류가 발생했습니다: {str(e)}")
-    finally:
-        # 임시 파일 정리
-        cleanup_temp_files()
+            except Exception as e:
+                st.error(f"처리 중 오류가 발생했습니다: {str(e)}")
+                st.error("다시 시도해주세요.")
+    else:
+        st.error("PDF 파일만 지원됩니다.")
+elif pdf_path:
+    st.error("파일을 찾을 수 없습니다. 경로를 확인해주세요.")
 
 # 사용 방법
 with st.expander("사용 방법"):
     st.markdown("""
-    1. PDF 파일을 선택합니다.
+    1. PDF 파일의 전체 경로를 입력합니다.
+       - 예: C:\\Users\\사용자명\\Documents\\example.pdf
     2. 표가 있는 페이지 범위를 입력합니다.
     3. 필요한 경우 추출 옵션을 설정합니다:
        - 격자형 표: 표에 선이 있는 경우 선택
        - 스트림 모드: 표에 선이 없는 경우 선택
        - 자동 감지: 표 위치를 자동으로 감지
-    4. '현장정보 추출' 또는 '표 추출하기' 버튼을 클릭합니다.
-    5. 추출된 결과를 다운로드합니다.
+    4. '표 추출하기' 버튼을 클릭합니다.
+    5. 추출된 표를 Excel 파일로 다운로드합니다.
     """) 
