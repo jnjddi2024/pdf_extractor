@@ -8,7 +8,7 @@ import PyPDF2
 import tempfile
 import shutil
 from pathlib import Path
-import base64
+import io
 
 # 페이지 설정
 st.set_page_config(
@@ -33,8 +33,12 @@ def cleanup_temp_files():
 def save_uploaded_file(uploaded_file):
     """업로드된 파일을 임시 디렉토리에 저장"""
     try:
+        # 파일명에서 특수문자 제거
+        safe_filename = "".join(c for c in uploaded_file.name if c.isalnum() or c in (' ', '-', '_', '.'))
+        safe_filename = safe_filename.replace(' ', '_')
+        
         # 임시 파일 경로 생성
-        temp_path = Path(st.session_state.temp_dir) / uploaded_file.name
+        temp_path = Path(st.session_state.temp_dir) / safe_filename
         temp_path = str(temp_path)
         
         # 파일 저장
@@ -59,20 +63,29 @@ def validate_pdf_file(file_path):
             
         # PDF 파일 유효성 검사
         with open(file_path, 'rb') as f:
-            PyPDF2.PdfReader(f)
+            pdf = PyPDF2.PdfReader(f)
+            if len(pdf.pages) == 0:
+                st.error("PDF 파일에 페이지가 없습니다.")
+                return False
             
         return True
     except Exception as e:
         st.error(f"PDF 파일이 손상되었거나 유효하지 않습니다: {str(e)}")
         return False
 
-def get_download_link(file_path, file_name, link_text):
-    """파일 다운로드 링크 생성"""
-    with open(file_path, "rb") as f:
-        bytes = f.read()
-        b64 = base64.b64encode(bytes).decode()
-        href = f'<a href="data:application/octet-stream;base64,{b64}" download="{file_name}">{link_text}</a>'
-        return href
+def get_excel_download_link(df_dict, filename):
+    """Excel 파일 다운로드 링크 생성"""
+    try:
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            for sheet_name, df in df_dict.items():
+                if not df.empty:
+                    df.to_excel(writer, sheet_name=sheet_name, index=False)
+        output.seek(0)
+        return output
+    except Exception as e:
+        st.error(f"Excel 파일 생성 중 오류 발생: {str(e)}")
+        return None
 
 def process_pdf(file_path, start_page, end_page, lattice, stream, guess):
     try:
@@ -228,11 +241,16 @@ if uploaded_file is not None:
         # 파일 정보 표시
         file_size = os.path.getsize(pdf_path) / 1024  # KB
         file_details = {
-            "파일명": uploaded_file.name,
+            "파일명": os.path.basename(pdf_path),
             "파일크기": f"{file_size:.2f} KB",
             "파일경로": os.path.abspath(pdf_path)
         }
         st.write(file_details)
+
+        # PDF 파일 유효성 검사
+        if not validate_pdf_file(pdf_path):
+            cleanup_temp_files()
+            st.stop()
 
         # 페이지 범위 입력
         col1, col2 = st.columns(2)
@@ -265,11 +283,6 @@ if uploaded_file is not None:
                 extract_tables = st.button("표 추출하기", type="primary")
 
         if extract_info or extract_tables:
-            # PDF 파일 유효성 검사
-            if not validate_pdf_file(pdf_path):
-                cleanup_temp_files()
-                st.stop()
-
             if extract_info:
                 with st.spinner("현장정보 추출 중..."):
                     # 페이지 범위 설정
@@ -288,35 +301,35 @@ if uploaded_file is not None:
                             st.subheader(f"추출된 텍스트 (페이지 {info_start_page}-{info_end_page})")
                             st.text_area("텍스트 내용", "\n".join(text_content), height=400)
                             
-                            # 텍스트 파일로 다운로드
-                            text_file_path = os.path.join(st.session_state.temp_dir, f"{pdf_filename}_text.txt")
-                            with open(text_file_path, "w", encoding="utf-8") as f:
-                                f.write("\n".join(text_content))
-                            
-                            # 다운로드 링크 생성
-                            st.markdown(get_download_link(text_file_path, f"{pdf_filename}_text.txt", "텍스트 파일 다운로드"), unsafe_allow_html=True)
+                            # 텍스트 파일 다운로드
+                            text_data = "\n".join(text_content).encode('utf-8')
+                            st.download_button(
+                                label="텍스트 파일 다운로드",
+                                data=text_data,
+                                file_name=f"{pdf_filename}_text.txt",
+                                mime="text/plain"
+                            )
                         
                         # 표 내용 표시
                         if tables_content:
                             st.subheader(f"추출된 표 (페이지 {info_start_page}-{info_end_page})")
+                            tables_dict = {}
                             for page, tables in tables_content:
-                                st.write(f"=== 페이지 {page}의 표 ===")
                                 for i, df in enumerate(tables):
                                     if not df.empty:
-                                        st.write(f"표 {i+1}")
+                                        st.write(f"=== 페이지 {page}의 표 {i+1} ===")
                                         st.dataframe(df)
+                                        tables_dict[f'Page{page}_Table{i+1}'] = df
                             
-                            # Excel 파일로 다운로드 (표만)
-                            excel_path = os.path.join(st.session_state.temp_dir, f"{pdf_filename}_tables.xlsx")
-                            with pd.ExcelWriter(excel_path, engine='openpyxl') as writer:
-                                for page, tables in tables_content:
-                                    for i, df in enumerate(tables):
-                                        if not df.empty:
-                                            sheet_name = f'Page{page}_Table{i+1}'
-                                            df.to_excel(writer, sheet_name=sheet_name, index=False)
-                            
-                            # 다운로드 링크 생성
-                            st.markdown(get_download_link(excel_path, f"{pdf_filename}_tables.xlsx", "표 Excel 파일 다운로드"), unsafe_allow_html=True)
+                            if tables_dict:
+                                # Excel 파일 다운로드
+                                excel_data = get_excel_download_link(tables_dict, f"{pdf_filename}_tables.xlsx")
+                                st.download_button(
+                                    label="표 Excel 파일 다운로드",
+                                    data=excel_data,
+                                    file_name=f"{pdf_filename}_tables.xlsx",
+                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                                )
                     else:
                         st.warning("내용을 추출할 수 없습니다.")
 
@@ -329,15 +342,17 @@ if uploaded_file is not None:
                         # PDF 파일명 가져오기 (확장자 제외)
                         pdf_filename = os.path.splitext(os.path.basename(pdf_path))[0]
                         
-                        # Excel 파일로 저장
-                        output_path = os.path.join(st.session_state.temp_dir, f"{pdf_filename}_tables.xlsx")
-                        with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
-                            for i, df in enumerate(tables):
-                                if not df.empty:
-                                    df.to_excel(writer, sheet_name=f'Table_{i+1}', index=False)
-
-                        # 다운로드 링크 생성
-                        st.markdown(get_download_link(output_path, f"{pdf_filename}_tables.xlsx", "Excel 파일 다운로드"), unsafe_allow_html=True)
+                        # 표를 딕셔너리로 변환
+                        tables_dict = {f'Table_{i+1}': df for i, df in enumerate(tables) if not df.empty}
+                        
+                        # Excel 파일 다운로드
+                        excel_data = get_excel_download_link(tables_dict, f"{pdf_filename}_tables.xlsx")
+                        st.download_button(
+                            label="Excel 파일 다운로드",
+                            data=excel_data,
+                            file_name=f"{pdf_filename}_tables.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                        )
 
                         # 미리보기
                         st.success("표 추출이 완료되었습니다!")
