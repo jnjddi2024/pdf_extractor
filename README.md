@@ -64,7 +64,7 @@ pip install streamlit tabula-py pandas PyPDF2
 7. 애플리케이션 실행:
 ```bash
 # 개발 모드로 실행
-streamlit run app.py
+streamlit run app.py --server.port 8501 --server.address 0.0.0.0
 
 # 백그라운드에서 실행 (nohup 사용)
 nohup streamlit run app.py --server.port 8501 --server.address 0.0.0.0 > streamlit.log 2>&1 &
@@ -96,10 +96,10 @@ Description=PDF Analyzer Streamlit App
 After=network.target
 
 [Service]
-User=your_username
-WorkingDirectory=/path/to/pdf_extractor
-Environment="PATH=/path/to/pdf_extractor/venv/bin"
-ExecStart=/path/to/pdf_extractor/venv/bin/streamlit run app.py --server.port 8501 --server.address 0.0.0.0
+User=ubuntu
+WorkingDirectory=/home/ubuntu/pdf_extractor
+Environment="PATH=/home/ubuntu/pdf_extractor/venv/bin"
+ExecStart=/home/ubuntu/pdf_extractor/venv/bin/streamlit run app.py --server.port 8501 --server.address 0.0.0.0
 Restart=always
 
 [Install]
@@ -119,9 +119,9 @@ sudo systemctl status pdf-analyzer
 
 ## 사용 방법
 
-1. PDF 파일 선택:
-   - "PDF 파일 선택하기" 버튼을 클릭하여 파일 선택
-   - 또는 파일 경로를 직접 입력
+1. PDF 파일 경로 입력:
+   - PDF 파일의 전체 경로를 입력
+   - 예: `/home/ubuntu/documents/example.pdf`
 
 2. 페이지 범위 설정:
    - 시작 페이지와 끝 페이지 입력
